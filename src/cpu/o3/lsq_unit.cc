@@ -618,6 +618,29 @@ LSQUnit::executeLoad(const DynInstPtr &inst)
         return NoFault;
     }
 
+    // For load-acquire (RCsc semantics): ensure any preceding store-release
+    // has sent its write to the memory system before this load can issue.
+    // ARM requires a load-acquire to be globally observed after any preceding
+    // store-release in the same thread (paired STLR/LDAR ordering).
+    if (inst->isReadBarrier()) {
+        for (auto sq_it = storeQueue.begin();
+             sq_it != storeQueue.end(); ++sq_it) {
+            if (!sq_it->valid())
+                continue;
+            DynInstPtr stlr = sq_it->instruction();
+            if (stlr->seqNum >= inst->seqNum)
+                break;
+            if (stlr->isWriteBarrier() && !stlr->isStoreConditional()
+                    && !stlr->isCompleted()) {
+                DPRINTF(LSQUnit, "Load-acquire [sn:%lli] waiting on "
+                        "store-release [sn:%lli] to write back\n",
+                        inst->seqNum, stlr->seqNum);
+                iewStage->rescheduleMemInst(inst);
+                return NoFault;
+            }
+        }
+    }
+
     load_fault = inst->initiateAcc();
 
     if (load_fault == NoFault && !inst->readMemAccPredicate()) {
@@ -1091,6 +1114,13 @@ LSQUnit::storePostSend()
 
     if (needsTSO) {
         storeInFlight = true;
+    }
+
+    // If this is a store-release, wake any load-acquire instructions that
+    // were stalled waiting for this write to reach the memory system.
+    if (storeWBIt->instruction()->isWriteBarrier() &&
+            !storeWBIt->instruction()->isStoreConditional()) {
+        iewStage->replayMemInst(storeWBIt->instruction());
     }
 
     storeWBIt++;
