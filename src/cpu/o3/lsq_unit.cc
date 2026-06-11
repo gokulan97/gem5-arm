@@ -618,6 +618,31 @@ LSQUnit::executeLoad(const DynInstPtr &inst)
         return NoFault;
     }
 
+    // For RCsc load-acquire (LDAR): stall until any preceding store-release
+    // has received its cache response (globally visible). This covers plain
+    // STLR, STLXR, and release atomics. LDAPR (RCpc) is excluded because
+    // it carries IsAcquireRCsc=false and does not require this ordering.
+    if (inst->isAcquireRCsc()) {
+        for (auto sq_it = storeQueue.begin();
+             sq_it != storeQueue.end(); ++sq_it) {
+            if (!sq_it->valid())
+                continue;
+            DynInstPtr stlr = sq_it->instruction();
+            if (stlr->seqNum >= inst->seqNum)
+                break;
+            bool is_release = sq_it->hasRequest()
+                ? sq_it->request()->mainReq()->isRelease()
+                : stlr->isWriteBarrier();
+            if (is_release && !sq_it->completed()) {
+                DPRINTF(LSQUnit, "Load-acquire [sn:%lli] waiting on "
+                        "store-release [sn:%lli] to complete\n",
+                        inst->seqNum, stlr->seqNum);
+                iewStage->rescheduleMemInst(inst);
+                return NoFault;
+            }
+        }
+    }
+
     load_fault = inst->initiateAcc();
 
     if (load_fault == NoFault && !inst->readMemAccPredicate()) {
@@ -1173,6 +1198,9 @@ LSQUnit::completeStore(typename StoreQueue::iterator store_idx)
     /* We 'need' a copy here because we may clear the entry from the
      * store queue. */
     DynInstPtr store_inst = store_idx->instruction();
+    // Save release flag before the entry may be popped from the queue.
+    bool is_release_store = store_idx->hasRequest() &&
+        store_idx->request()->mainReq()->isRelease();
     if (store_idx == storeQueue.begin()) {
         do {
             storeQueue.front().clear();
@@ -1202,6 +1230,13 @@ LSQUnit::completeStore(typename StoreQueue::iterator store_idx)
     }
 
     store_inst->setCompleted();
+
+    // Wake any RCsc load-acquire instructions that were stalled waiting
+    // for this store-release to be globally visible (cache response
+    // received). Covers STLR, STLXR, and release atomics.
+    if (is_release_store) {
+        iewStage->replayMemInst(store_inst);
+    }
 
     if (needsTSO) {
         storeInFlight = false;

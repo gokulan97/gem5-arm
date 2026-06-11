@@ -82,6 +82,7 @@ class StaticInstFlags(Enum):
         "IsSerializeAfter",
         "IsWriteBarrier",  # Is a write barrier
         "IsReadBarrier",  # Is a read barrier
+        "IsAcquireRCsc",  # RCsc load-acquire (LDAR); excludes RCpc (LDAPR)
         "IsNonSpeculative",  # Should not be executed speculatively
         "IsQuiesce",  # Is a quiesce instruction
         "IsUnverifiable",  # Can't be verified by a checker

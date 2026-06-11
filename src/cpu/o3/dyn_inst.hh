@@ -576,6 +576,7 @@ class DynInst : public ExecContext, public RefCounted
     bool isFullMemBarrier()   const { return staticInst->isFullMemBarrier(); }
     bool isReadBarrier() const { return staticInst->isReadBarrier(); }
     bool isWriteBarrier() const { return staticInst->isWriteBarrier(); }
+    bool isAcquireRCsc() const { return staticInst->isAcquireRCsc(); }
     bool isNonSpeculative() const { return staticInst->isNonSpeculative(); }
     bool isQuiesce() const { return staticInst->isQuiesce(); }
     bool isUnverifiable() const { return staticInst->isUnverifiable(); }
