@@ -91,7 +91,8 @@ let {{
                 self.memFlags.append("ArmISA::MMU::AllowUnaligned")
 
             if self.flavor in ("acquire", "acex", "acexp"):
-                self.instFlags.extend(["IsWriteBarrier", "IsReadBarrier"])
+                self.instFlags.extend(["IsWriteBarrier", "IsReadBarrier",
+                                       "IsAcquireRCsc"])
                 self.memFlags.append("Request::ACQUIRE")
 
             if self.flavor in ("acquire_pc"):

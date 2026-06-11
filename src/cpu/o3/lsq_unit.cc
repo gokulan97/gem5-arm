@@ -618,11 +618,11 @@ LSQUnit::executeLoad(const DynInstPtr &inst)
         return NoFault;
     }
 
-    // For load-acquire (RCsc semantics): ensure any preceding store-release
-    // has sent its write to the memory system before this load can issue.
-    // ARM requires a load-acquire to be globally observed after any preceding
-    // store-release in the same thread (paired STLR/LDAR ordering).
-    if (inst->isReadBarrier()) {
+    // For RCsc load-acquire (LDAR): stall until any preceding store-release
+    // has received its cache response (globally visible). This covers plain
+    // STLR, STLXR, and release atomics. LDAPR (RCpc) is excluded because
+    // it carries IsAcquireRCsc=false and does not require this ordering.
+    if (inst->isAcquireRCsc()) {
         for (auto sq_it = storeQueue.begin();
              sq_it != storeQueue.end(); ++sq_it) {
             if (!sq_it->valid())
@@ -630,10 +630,12 @@ LSQUnit::executeLoad(const DynInstPtr &inst)
             DynInstPtr stlr = sq_it->instruction();
             if (stlr->seqNum >= inst->seqNum)
                 break;
-            if (stlr->isWriteBarrier() && !stlr->isStoreConditional()
-                    && !stlr->isCompleted()) {
+            bool is_release = sq_it->hasRequest()
+                ? sq_it->request()->mainReq()->isRelease()
+                : stlr->isWriteBarrier();
+            if (is_release && !sq_it->completed()) {
                 DPRINTF(LSQUnit, "Load-acquire [sn:%lli] waiting on "
-                        "store-release [sn:%lli] to write back\n",
+                        "store-release [sn:%lli] to complete\n",
                         inst->seqNum, stlr->seqNum);
                 iewStage->rescheduleMemInst(inst);
                 return NoFault;
@@ -1116,13 +1118,6 @@ LSQUnit::storePostSend()
         storeInFlight = true;
     }
 
-    // If this is a store-release, wake any load-acquire instructions that
-    // were stalled waiting for this write to reach the memory system.
-    if (storeWBIt->instruction()->isWriteBarrier() &&
-            !storeWBIt->instruction()->isStoreConditional()) {
-        iewStage->replayMemInst(storeWBIt->instruction());
-    }
-
     storeWBIt++;
 }
 
@@ -1203,6 +1198,9 @@ LSQUnit::completeStore(typename StoreQueue::iterator store_idx)
     /* We 'need' a copy here because we may clear the entry from the
      * store queue. */
     DynInstPtr store_inst = store_idx->instruction();
+    // Save release flag before the entry may be popped from the queue.
+    bool is_release_store = store_idx->hasRequest() &&
+        store_idx->request()->mainReq()->isRelease();
     if (store_idx == storeQueue.begin()) {
         do {
             storeQueue.front().clear();
@@ -1232,6 +1230,13 @@ LSQUnit::completeStore(typename StoreQueue::iterator store_idx)
     }
 
     store_inst->setCompleted();
+
+    // Wake any RCsc load-acquire instructions that were stalled waiting
+    // for this store-release to be globally visible (cache response
+    // received). Covers STLR, STLXR, and release atomics.
+    if (is_release_store) {
+        iewStage->replayMemInst(store_inst);
+    }
 
     if (needsTSO) {
         storeInFlight = false;
