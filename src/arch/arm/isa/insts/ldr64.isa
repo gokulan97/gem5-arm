@@ -87,7 +87,7 @@ let {{
                 self.memFlags.append("%d" % int(math.log(self.size, 2)))
 
             if self.flavor not in ("acquire", "acex", "exclusive",
-                                   "acexp", "exp"):
+                                   "acexp", "exp", "acquire_pc_reg"):
                 self.memFlags.append("ArmISA::MMU::AllowUnaligned")
 
             if self.flavor in ("acquire", "acex", "acexp"):
@@ -95,7 +95,7 @@ let {{
                                        "IsAcquireRCsc"])
                 self.memFlags.append("Request::ACQUIRE")
 
-            if self.flavor in ("acquire_pc"):
+            if self.flavor in ("acquire_pc", "acquire_pc_reg"):
                 self.instFlags.extend(["IsWriteBarrier", "IsReadBarrier"])
                 self.memFlags.append("Request::ACQUIRE_PC")
 
@@ -154,7 +154,8 @@ let {{
                 assert not wbDecl
 
             fa_code = None
-            if not self.micro and self.flavor in ("normal", "widen", "acquire"):
+            if not self.micro and self.flavor in ("normal", "widen", "acquire",
+                                                   "acquire_pc_reg"):
                 fa_code = '''
                     fault->annotate(ArmISA::ArmFault::SAS, %s);
                     fault->annotate(ArmISA::ArmFault::SSE, %s);
@@ -167,7 +168,8 @@ let {{
                        "true" if self.sign else "false",
                        "true" if (self.size == 8 or
                                   self.flavor == "widen") else "false",
-                       "true" if self.flavor == "acquire" else "false")
+                       "true" if self.flavor in ("acquire", "acquire_pc_reg")
+                               else "false")
 
             (newHeader, newDecoder, newExec) = \
                 self.fillTemplates(self.name, self.Name, self.codeBlobs,
@@ -509,10 +511,10 @@ let {{
     LoadEx64("ldxrh", "LDXRH64", size=2, flavor="exclusive").emit()
     LoadEx64("ldxrb", "LDXRB64", size=1, flavor="exclusive").emit()
 
-    LoadRaw64("ldapr", "LDAPRX64", size=8, flavor="acquire").emit()
-    LoadRaw64("ldapr", "LDAPRW64", size=4, flavor="acquire").emit()
-    LoadRaw64("ldaprh", "LDAPRH64", size=2, flavor="acquire").emit()
-    LoadRaw64("ldaprb", "LDAPRB64", size=1, flavor="acquire").emit()
+    LoadRaw64("ldapr", "LDAPRX64", size=8, flavor="acquire_pc_reg").emit()
+    LoadRaw64("ldapr", "LDAPRW64", size=4, flavor="acquire_pc_reg").emit()
+    LoadRaw64("ldaprh", "LDAPRH64", size=2, flavor="acquire_pc_reg").emit()
+    LoadRaw64("ldaprb", "LDAPRB64", size=1, flavor="acquire_pc_reg").emit()
 
     class LoadImmU64(LoadImm64):
         decConstBase = 'LoadStoreImmU64'
